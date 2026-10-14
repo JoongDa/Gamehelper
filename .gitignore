@@ -1,6 +1,7 @@
 # Build
 bin/
 obj/
+artifacts/
 publish/
 publish-downloader/
 Test/
