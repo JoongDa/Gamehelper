@@ -66,6 +66,10 @@ namespace StashUtility
         private readonly Dictionary<string, string> jewelCategorySearchTerms = new();
         private readonly Dictionary<string, int> jewelCategorySelectedIndices = new();
 
+        // Equipment UI State
+        private readonly Dictionary<string, string> equipmentCategorySearchTerms = new();
+        private readonly Dictionary<string, int> equipmentCategorySelectedIndices = new();
+
         // Debug UI Path Explorer State
         private readonly List<int> currentDebugPath = new();
         private string explorerRootAddressStr = string.Empty;
@@ -1036,6 +1040,221 @@ namespace StashUtility
                                                     if (ImGui.Selectable(matchingMods[i].Name, isSel))
                                                     {
                                                         jewelCategorySelectedIndices[searchKey] = i;
+                                                    }
+                                                    if (isSel) ImGui.SetItemDefaultFocus();
+                                                }
+                                                ImGui.EndCombo();
+                                            }
+
+                                            ImGui.SameLine();
+                                            var targetMod = matchingMods[selIdx];
+                                            if (ImGui.Button($"Add Mod##add_mod_{searchKey}"))
+                                            {
+                                                if (!group.ModPatternIds.Contains(targetMod.Id))
+                                                {
+                                                    group.ModPatternIds.Add(targetMod.Id);
+                                                    SaveSettings();
+                                                }
+                                            }
+                                        }
+
+                                        // Active Mods List inside Group
+                                        ImGui.TextColored(new Vector4(0.4f, 0.8f, 1f, 1f), $"Active Group Modifiers ({group.ModPatternIds.Count}):");
+                                        ImGui.BeginChild($"ActiveGroupMods_{searchKey}", new Vector2(0, 160), ImGuiChildFlags.Borders);
+
+                                        var activeGroupMods = allCatMods.Where(m => group.ModPatternIds.Contains(m.Id)).ToList();
+                                        if (activeGroupMods.Count == 0)
+                                        {
+                                            ImGui.TextDisabled("No modifiers added to this group profile yet.");
+                                        }
+                                        else
+                                        {
+                                            foreach (var mod in activeGroupMods)
+                                            {
+                                                ImGui.PushID($"GrpMod_{searchKey}_{mod.Id}");
+                                                if (ImGui.Button(" X "))
+                                                {
+                                                    group.ModPatternIds.Remove(mod.Id);
+                                                    SaveSettings();
+                                                }
+                                                ImGui.SameLine();
+                                                ImGui.TextUnformatted(mod.Name);
+
+                                                if (mod.MinRoll != mod.MaxRoll)
+                                                {
+                                                    ImGui.Indent(25f);
+                                                    if (!group.ModRequiredMinRolls.ContainsKey(mod.Id))
+                                                        group.ModRequiredMinRolls[mod.Id] = mod.MinRoll;
+
+                                                    float reqRoll = group.ModRequiredMinRolls[mod.Id];
+                                                    int intRoll = (int)reqRoll;
+                                                    if (ImGui.SliderInt($"Req. Min Roll##min_{mod.Id}", ref intRoll, (int)mod.MinRoll, (int)mod.MaxRoll))
+                                                    {
+                                                        group.ModRequiredMinRolls[mod.Id] = (float)intRoll;
+                                                        SaveSettings();
+                                                    }
+                                                    ImGui.Unindent(25f);
+                                                }
+                                                ImGui.PopID();
+                                                ImGui.Separator();
+                                            }
+                                        }
+                                        ImGui.EndChild();
+                                        ImGui.Unindent(10f);
+                                    }
+                                    ImGui.PopID();
+                                    ImGui.Spacing();
+                                }
+
+                                ImGui.EndTabItem();
+                            }
+                        }
+                        ImGui.EndTabBar();
+                    }
+                }
+
+                ImGui.Unindent();
+            }
+
+            ImGui.Checkbox(PluginText.T("stashutility.enable_equipment_manager", "Enable Equipment Manager"), ref Settings.EnableEquipmentManager);
+            ImGuiHelper.ToolTip(PluginText.T("stashutility.enable_equipment_manager_tooltip", "Enables or disables highlighting of Equipment in stash tabs."));
+            if (Settings.EnableEquipmentManager)
+            {
+                ImGui.Indent();
+                if (ImGui.CollapsingHeader(PluginText.T("stashutility.equipment_mod_manager_header", "Equipment Mod Filter Manager")))
+                {
+                    if (ImGui.Checkbox(PluginText.T("stashutility.filter_equipment_great", "Filter Equipment Great Status"), ref Settings.FilterEquipmentGreat)) SaveSettings();
+                    if (Settings.FilterEquipmentGreat)
+                    {
+                        ImGui.SameLine();
+                        ImGui.SetCursorPosX(300f);
+                        ImGui.SetNextItemWidth(150f);
+                        if (ImGui.SliderInt(PluginText.T("stashutility.min_good_equipment_mods", "Min Good Equipment Mods Count"), ref Settings.MinEquipmentGoodMods, 1, 4)) SaveSettings();
+                    }
+                    ImGui.Spacing();
+
+                    if (ImGui.BeginTabBar("EquipmentCategoryTabs"))
+                    {
+                        var categories = new Dictionary<string, Func<Models.EquipmentMod, bool>>
+                        {
+                            { "Weapons",     m => m.Category == "Weapons" },
+                            { "Helmets",     m => m.Category == "Helmets" },
+                            { "Body Armour", m => m.Category == "Body Armour" },
+                            { "Gloves",      m => m.Category == "Gloves" },
+                            { "Boots",       m => m.Category == "Boots" },
+                            { "Rings",       m => m.Category == "Rings" },
+                            { "Amulets",     m => m.Category == "Amulets" },
+                            { "Belts",       m => m.Category == "Belts" },
+                            { "Shields",     m => m.Category == "Shields" },
+                            { "Quivers",     m => m.Category == "Quivers" }
+                        };
+
+                        foreach (var kvp in categories)
+                        {
+                            if (ImGui.BeginTabItem(kvp.Key))
+                            {
+                                string cat = kvp.Key;
+                                var allCatMods = Data.ModDatabase.AllEquipmentMods.Where(kvp.Value).ToList();
+
+                                if (!Settings.EquipmentCategoryGroups.TryGetValue(cat, out var groupList) || groupList == null)
+                                {
+                                    groupList = new List<StashUtility.Models.EquipmentGroup>();
+                                    Settings.EquipmentCategoryGroups[cat] = groupList;
+                                }
+
+                                // Migration / Default initialization
+                                if (groupList.Count == 0)
+                                {
+                                    var defGroup = new StashUtility.Models.EquipmentGroup { Name = "Default Profile", MinMatchCount = Settings.MinEquipmentGoodModsToHighlight };
+                                    var catModIds = allCatMods.Select(m => m.Id).ToHashSet();
+                                    defGroup.ModPatternIds = Settings.EquipmentGoodModPatterns.Where(id => catModIds.Contains(id)).ToList();
+                                    foreach (var id in defGroup.ModPatternIds)
+                                    {
+                                        if (Settings.EquipmentModRequiredMinRolls.TryGetValue(id, out float roll))
+                                            defGroup.ModRequiredMinRolls[id] = roll;
+                                    }
+                                    groupList.Add(defGroup);
+                                    SaveSettings();
+                                }
+
+                                if (ImGui.Button($"+ Add New Profile Group##add_group_{cat}"))
+                                {
+                                    groupList.Add(new StashUtility.Models.EquipmentGroup { Name = $"Profile Group {groupList.Count + 1}", MinMatchCount = 2 });
+                                    SaveSettings();
+                                }
+                                ImGui.Separator();
+
+                                for (int gIdx = 0; gIdx < groupList.Count; gIdx++)
+                                {
+                                    var group = groupList[gIdx];
+                                    ImGui.PushID($"Group_{cat}_{group.Id}");
+
+                                    string groupHeaderName = string.IsNullOrWhiteSpace(group.Name) ? $"Group {gIdx + 1}" : group.Name;
+                                    if (ImGui.CollapsingHeader($"{groupHeaderName} (Min Match: {group.MinMatchCount})##header_{group.Id}", ImGuiTreeNodeFlags.DefaultOpen))
+                                    {
+                                        ImGui.Indent(10f);
+
+                                        string nameBuf = group.Name ?? string.Empty;
+                                        ImGui.SetNextItemWidth(180f);
+                                        if (ImGui.InputText($"Group Name##name_{group.Id}", ref nameBuf, 50))
+                                        {
+                                            group.Name = nameBuf;
+                                            SaveSettings();
+                                        }
+
+                                        ImGui.SameLine();
+                                        ImGui.SetNextItemWidth(140f);
+                                        int minMatch = group.MinMatchCount;
+                                        if (ImGui.SliderInt($"Min Match##min_{group.Id}", ref minMatch, 1, 6))
+                                        {
+                                            group.MinMatchCount = minMatch;
+                                            SaveSettings();
+                                        }
+
+                                        if (groupList.Count > 1)
+                                        {
+                                            ImGui.SameLine();
+                                            if (ImGui.Button($"Delete Group##del_{group.Id}"))
+                                            {
+                                                groupList.RemoveAt(gIdx);
+                                                SaveSettings();
+                                                ImGui.Unindent(10f);
+                                                ImGui.PopID();
+                                                break;
+                                            }
+                                        }
+
+                                        // Search & Add Mod inside this group
+                                        string searchKey = $"{cat}_{group.Id}";
+                                        if (!equipmentCategorySearchTerms.ContainsKey(searchKey)) equipmentCategorySearchTerms[searchKey] = string.Empty;
+                                        if (!equipmentCategorySelectedIndices.ContainsKey(searchKey)) equipmentCategorySelectedIndices[searchKey] = 0;
+
+                                        string filter = equipmentCategorySearchTerms[searchKey];
+                                        var matchingMods = string.IsNullOrWhiteSpace(filter)
+                                            ? allCatMods
+                                            : allCatMods.Where(m => m.Name.Contains(filter, StringComparison.OrdinalIgnoreCase) || m.Id.Contains(filter, StringComparison.OrdinalIgnoreCase)).ToList();
+
+                                        ImGui.SetNextItemWidth(220f);
+                                        if (ImGui.InputText($"Search Mod##search_{searchKey}", ref filter, 100))
+                                        {
+                                            equipmentCategorySearchTerms[searchKey] = filter;
+                                            equipmentCategorySelectedIndices[searchKey] = 0;
+                                        }
+
+                                        if (matchingMods.Count > 0)
+                                        {
+                                            int selIdx = Math.Clamp(equipmentCategorySelectedIndices[searchKey], 0, matchingMods.Count - 1);
+                                            string comboLabel = matchingMods[selIdx].Name;
+
+                                            ImGui.SetNextItemWidth(450f);
+                                            if (ImGui.BeginCombo($"Select Mod##combo_{searchKey}", comboLabel))
+                                            {
+                                                for (int i = 0; i < matchingMods.Count; i++)
+                                                {
+                                                    bool isSel = (i == selIdx);
+                                                    if (ImGui.Selectable(matchingMods[i].Name, isSel))
+                                                    {
+                                                        equipmentCategorySelectedIndices[searchKey] = i;
                                                     }
                                                     if (isSel) ImGui.SetItemDefaultFocus();
                                                 }

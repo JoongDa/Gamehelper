@@ -162,5 +162,38 @@ namespace StashUtility.Data
             }
             return new List<JewelMod>();
         }
+
+        public static readonly List<EquipmentMod> AllEquipmentMods = LoadEquipmentMods();
+
+        private static List<EquipmentMod> LoadEquipmentMods()
+        {
+            try
+            {
+                var asmDir = System.IO.Path.GetDirectoryName(typeof(ModDatabase).Assembly.Location) ?? "";
+                string[] candidatePaths = new[]
+                {
+                    System.IO.Path.Combine(asmDir, "Data", "equipment_mod_ranges.json"),
+                    System.IO.Path.Combine(asmDir, "equipment_mod_ranges.json"),
+                    System.IO.Path.Combine(System.AppDomain.CurrentDomain.BaseDirectory, "Plugins", "StashUtility", "Data", "equipment_mod_ranges.json"),
+                    System.IO.Path.Combine(System.AppDomain.CurrentDomain.BaseDirectory, "Plugins", "StashUtility", "equipment_mod_ranges.json"),
+                };
+
+                foreach (var p in candidatePaths)
+                {
+                    if (System.IO.File.Exists(p))
+                    {
+                        string json = System.IO.File.ReadAllText(p);
+                        var list = Newtonsoft.Json.JsonConvert.DeserializeObject<List<EquipmentMod>>(json);
+                        if (list != null && list.Count > 0) return list;
+                    }
+                }
+            }
+            catch
+            {
+                // Fallback empty list if file reading fails
+            }
+            return new List<EquipmentMod>();
+        }
+
     }
 }
